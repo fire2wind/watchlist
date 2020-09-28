@@ -1,5 +1,5 @@
 from flask import Flask,render_template
-from flask import url_for
+from flask import url_for,request,redirect,flash
 from flask_sqlalchemy import SQLAlchemy
 import os
 import sys
@@ -15,6 +15,7 @@ app = Flask(__name__) #创建一个Flask对象
 
 app.config['SQLALCHEMY_DATABASE_URI'] = prefix + os.path.join(app.root_path,'data.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False #关闭对模型修改的监控
+app.config['SECRET_KEY'] = 'dev' #设置签名所需的密钥
 #在扩展类实例化前加载配置
 db = SQLAlchemy(app)
 
@@ -75,15 +76,57 @@ def inject_user():
 def page_not_found(e):
 	return render_template('404.html'), 404
 
-@app.route('/') 
+@app.route('/', methods=['GET','POST']) 
 def index():
-	#user = User.query.first()
+	if request.method == 'POST':
+		#获取表单数据, request.form是一个字典
+		title = request.form.get('title')
+		year = request.form.get('year')
+		#服务端验证数据
+		if not title or not year or len(year) > 4 or len(title) > 60:
+			flash('Invalid input.') #显示错误提示
+			return redirect(url_for('index')) #重定向回主页
+		#保存表单数据到数据库
+		movie = Movie(title=title, year=year) #创建记录
+		db.session.add(movie)
+		db.session.commit()
+		flash('Item created.') #显示成功创建的提示
+		return redirect(url_for('index')) #重定向回主页
+	user = User.query.first()
 	movies = Movie.query.all()
-	return render_template('index.html', movies=movies)
+	return render_template('index.html', user=user,movies=movies)
 
 @app.route('/user/<name>')
 def user_page(name):
 	return 'User: %s' % name
+
+#编辑电影条目
+@app.route('/movie/edit/<int:movie_id>',methods=['GET','POST'])
+def edit(movie_id):
+	movie = Movie.query.get_or_404(movie_id)
+	if request.method == 'POST':
+		title = request.form.get('title')
+		year = request.form.get('year')
+		#服务端验证数据
+		if not title or not year or len(year) > 4 or len(title) > 60:
+			flash('Invalid input.') #显示错误提示
+			return redirect(url_for('edit',movie_id=movie_id)) #重定回对应的编辑页面
+		#保存表单数据到数据库
+		movie.title = title
+		movie.year = year
+		db.session.commit()
+		flash('Item updated.')
+		return redirect(url_for('index')) #重定向回主页
+	return render_template('edit.html', movie=movie) #传入被编辑的电影记录
+
+#删除电影条目
+@app.route('/movie/delete/<int:movie_id>',methods=['POST'])
+def delete(movie_id):
+	movie = Movie.query.get_or_404(movie_id)
+	db.session.delete(movie)
+	db.session.commit()
+	flash('Itemm deleted')
+	return redirect(url_for('index'))
 
 @app.route('/test')
 def test_url_for():
