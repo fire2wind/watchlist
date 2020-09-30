@@ -19,15 +19,56 @@ app.config['SECRET_KEY'] = 'dev' #设置签名所需的密钥
 #在扩展类实例化前加载配置
 db = SQLAlchemy(app)
 
-#创建数据库模型
-class User(db.Model): #模板类要声明继承db.Model
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_login import UserMixin
+from flask_login import login_required, logout_user
+from flask_login import login_user, current_user
+class User(db.Model, UserMixin): 
 	#每一个类属性(字段)要实例化db.Column
 	id = db.Column(db.Integer, primary_key=True)
 	name = db.Column(db.String(20))
+	username = db.Column(db.String(20))
+	password_hash = db.Column(db.String(128)) #密码散列
+
+	def set_password(self, password):
+		self.password_hash = generate_password_hash(password)
+	
+	def validate_password(self, password):
+		return check_password_hash(self.password_hash, password)
+
 class Movie(db.Model):
 	id = db.Column(db.Integer, primary_key=True)
 	title = db.Column(db.String(60))
 	year = db.Column(db.String(4))
+
+from flask_login import LoginManager
+login_manager = LoginManager(app) #实例化扩展类
+login_manager.login_view = 'login' #登录示图端点
+@login_manager.user_loader
+#创建用户加载回调函数，接收用户ID作为参数
+def load_user(user_id):
+	user = User.query.get(int(user_id))
+	return user
+#自定义命令admin，创建管理员
+@app.cli.command()
+@click.option('--username', prompt=True, help='The username used to login')
+@click.option('--password', prompt=True, hide_input=True,\
+	confirmation_prompt=True, help='The password used to login.')
+def admin(username, password):
+	"""Create user."""
+	db.create_all()
+	user = User.query.first()
+	if user is not None:
+		click.echo('Updating user...')
+		user.username = username
+		user.set_password(password)
+	else:
+		click.echo('Creating user...')
+		user = User(username=username, name ='Admin')
+		user.set_password(password)
+		db.session.add(user)
+	db.session.commit()
+	click.echo('Done')
 
 #自定义命令initdb
 @app.cli.command() #注册为命令
@@ -79,6 +120,8 @@ def page_not_found(e):
 @app.route('/', methods=['GET','POST']) 
 def index():
 	if request.method == 'POST':
+		if not current_user.is_authenticated: #用户未认证
+			return redirect(url_for('index'))
 		#获取表单数据, request.form是一个字典
 		title = request.form.get('title')
 		year = request.form.get('year')
@@ -102,6 +145,7 @@ def user_page(name):
 
 #编辑电影条目
 @app.route('/movie/edit/<int:movie_id>',methods=['GET','POST'])
+@login_required #登录保护
 def edit(movie_id):
 	movie = Movie.query.get_or_404(movie_id)
 	if request.method == 'POST':
@@ -121,6 +165,7 @@ def edit(movie_id):
 
 #删除电影条目
 @app.route('/movie/delete/<int:movie_id>',methods=['POST'])
+@login_required #登录保护
 def delete(movie_id):
 	movie = Movie.query.get_or_404(movie_id)
 	db.session.delete(movie)
@@ -128,12 +173,47 @@ def delete(movie_id):
 	flash('Itemm deleted')
 	return redirect(url_for('index'))
 
-@app.route('/test')
-def test_url_for():
-	print(url_for('hello'))
-	print(url_for('user_page', name='greyli'))
-	print(url_for('user_page', name='peter'))
-	print(url_for('test_url_for'))
-	print(url_for('test_url_for', num=2))
-	return 'Test page'
+#用户登录
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+	if request.method == 'POST':
+		username = request.form['username']
+		password = request.form['password']
+		if not username or not password:
+			flash('Invalid input')
+			return redirect(url_for('login'))
+		
+		user = User.query.first()
+		#验证用户名和密码
+		if username == user.username and user.validate_password(password):
+			login_user(user)
+			flash('Login success')
+			return redirect(url_for('index'))
+		flash('Invalid username or password')
+		return redirect(url_for('login'))
+	return render_template('login.html')
+
+#登出
+@app.route('/logout')
+@login_required #用于视图保护
+def logout():
+	logout_user()
+	flash('Goodbye')
+	return redirect(url_for('index'))
+
+#设置用户名
+@app.route('/settings', methods=['GET','POST'])
+@login_required
+def settings():
+	if request.method == 'POST':
+		name = request.form['name']
+		if not name or len(name) > 20:
+			flash('Invalid input.')
+			return redirect(url_for('settings'))
+		current_user.name = name
+		db.session.commit()
+		flash('Settings updated.')
+		return redirect(url_for('index'))
+	return render_template('settings.html')
+
 
