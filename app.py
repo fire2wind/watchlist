@@ -170,7 +170,7 @@ def delete(movie_id):
 	movie = Movie.query.get_or_404(movie_id)
 	db.session.delete(movie)
 	db.session.commit()
-	flash('Itemm deleted')
+	flash('Item deleted')
 	return redirect(url_for('index'))
 
 #用户登录
@@ -180,7 +180,7 @@ def login():
 		username = request.form['username']
 		password = request.form['password']
 		if not username or not password:
-			flash('Invalid input')
+			flash('Invalid input.')
 			return redirect(url_for('login'))
 		
 		user = User.query.first()
